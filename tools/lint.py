@@ -76,6 +76,38 @@ def check_js(root: Path) -> list:
     return problems
 
 
+def check_server(root: Path) -> list:
+    problems = []
+    source = (root / "server.py").read_text(encoding="utf-8")
+
+    # Seed backfill may create settings.json, whose absence is itself part of
+    # first-run detection. Checking afterwards made onboarding unreachable on
+    # every fresh install in 1.2.6 and 1.2.7.
+    bootstrap = re.search(
+        r'if parts == \["bootstrap"\].*?(?=\n        # ----|\Z)', source, re.S)
+    if not bootstrap:
+        problems.append("server.py: bootstrap route not found")
+    else:
+        body = bootstrap.group(0)
+        first = body.find("is_first_run = first_run()")
+        seeded = [body.find('"personas": get_personas()'),
+                  body.find('"prompts": get_prompts()')]
+        if first < 0 or any(pos < 0 for pos in seeded):
+            problems.append("server.py: bootstrap must read first-run state and seeded collections")
+        elif first > min(seeded):
+            problems.append(
+                "server.py: call first_run() before get_personas()/get_prompts(); "
+                "seed backfill creates settings.json and hides onboarding")
+
+    main = source[source.find("def main()") :]
+    startup = main[:main.find("server.serve_forever()")]
+    if "get_personas()" in startup or "get_prompts()" in startup:
+        problems.append(
+            "server.py: do not seed collections during startup; seed tracking "
+            "creates settings.json before bootstrap can detect a fresh install")
+    return problems
+
+
 # --------------------------------------------------------------------------
 # documentation checks
 # --------------------------------------------------------------------------
@@ -269,7 +301,7 @@ def check_docs(root: Path) -> list:
 def main() -> int:
     root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else \
         Path(__file__).resolve().parent.parent
-    problems = check_js(root) + check_docs(root)
+    problems = check_js(root) + check_server(root) + check_docs(root)
 
     for problem in problems:
         print(f"  {problem}")

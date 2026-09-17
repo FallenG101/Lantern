@@ -48,7 +48,7 @@ except ImportError:      # exotic build with no zoneinfo — local time still wo
 
 # The single source of truth for the version. build-app.sh reads this line to
 # stamp Info.plist, so the app bundle and the About panel cannot disagree.
-VERSION = "1.2.7"
+VERSION = "1.2.8"
 
 # The update check. Unauthenticated and read-only; GitHub allows 60 requests an
 # hour per IP, which one check per launch cannot come near.
@@ -89,13 +89,13 @@ DEFAULT_SETTINGS = {
     "render_markdown": True,
     "thinking_open": False,       # auto-expand thinking blocks while streaming
     "sidebar_collapsed": False,
-    # Whether a new chat starts with tool calling on. On by default since 1.3.0 —
+    # Whether a new chat starts with tool calling on. On by default since 1.2.2 —
     # the pill reads "auto" because the model decides whether to call anything,
     # and tools are only ever offered to models that advertise support. Turn this
     # off if you would rather pay no schema tokens until you ask.
     #
-    # Note this does *not* enable the URL reader: `read_url` is gated separately
-    # on `web_reader`, which stays off.
+    # `read_url` is gated separately on `web_reader`, so either default can be
+    # changed without silently changing the other.
     "tools_default": True,
     # How long Ollama keeps a model in memory after a reply. "" uses Ollama's
     # own default (5m). Longer avoids paying a full reload after a pause.
@@ -111,7 +111,7 @@ DEFAULT_SETTINGS = {
     # Set once the first-run flow is finished or skipped. Never consulted alone:
     # see first_run() for why the *absence* of history matters more.
     "onboarded": False,
-    # Lets the model fetch a web page. On by default since 1.3.0: pasting a link
+    # Lets the model fetch a web page. On by default since 1.2.2: pasting a link
     # and asking about it is an unambiguous request, and refusing until you find
     # a setting is the wrong default. "Local-first" is about where inference
     # happens, not about never resolving a hostname.
@@ -1786,12 +1786,18 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- bootstrap ---------------------------------------------------
         if parts == ["bootstrap"] and method == "GET":
+            # Capture this before reading the seeded collections. Their getters
+            # record which seeds have been offered in settings.json, and the
+            # existence of that file is itself part of first-run detection.
+            # Doing this inside the payload after get_personas()/get_prompts()
+            # made every genuinely fresh install look already used.
+            is_first_run = first_run()
             payload = {
                 "settings": get_settings(),
                 "personas": get_personas(),
                 "prompts": get_prompts(),
                 "folders": get_folders(),
-                "first_run": first_run(),
+                "first_run": is_first_run,
                 "chats": list_chats(),
                 "version": VERSION,
                 "tools": tool_catalog(),
@@ -2380,7 +2386,6 @@ def main() -> int:
     args = parser.parse_args()
 
     ensure_dirs()
-    get_personas()
 
     # Binding beyond loopback is opt-in; keep that host reachable but say so.
     if args.host not in LOOPBACK:

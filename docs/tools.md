@@ -190,7 +190,7 @@ tool is called. That is the trade the setting exists to let you undo.
 
 ## The URL reader ships enabled — and what "local-first" actually means
 
-Changed in 1.3.0, deliberately, after shipping it off by default in 1.2.0.
+Changed in 1.2.2, deliberately, after shipping it off by default in 1.2.0.
 
 The argument that won: **a user pasting a link and asking about it has already
 said what they want.** Answering "I can't read that" until they hunt through

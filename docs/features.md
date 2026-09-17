@@ -333,6 +333,16 @@ an update feel broken. `first_run()` requires **no settings file *and* no chats*
 Verified both ways: a fresh folder reports true, a folder with one chat reports
 false.
 
+**That check must run before the seeded collections are read.** Seed backfill
+records the persona and prompt names it has offered in `settings.json`; from
+in 1.2.6 and 1.2.7, server startup eagerly seeded personas and bootstrap read both
+collections before calling `first_run()`, so the act of preparing a fresh
+install made it look used and the flow never appeared. Startup no longer seeds
+anything, bootstrap captures the first-run state before it reads the seeded
+collections, and the project linter enforces both rules. Verified against an
+empty scratch data folder: the first bootstrap reports true, finishing or
+skipping setup makes later ones report false.
+
 **Two things the flow had to fix about itself**, both found by clicking it:
 
 - Boot creates a blank chat *before* the flow runs, and that chat captured
@@ -374,7 +384,7 @@ edits, and a fresh install has the seeds.
 
 ## Think and Tools live under the composer
 
-Moved there in 1.3.0. They change the **next message**; model and persona are
+Moved there in 1.2.2. They change the **next message**; model and persona are
 settings for the whole chat. Grouping by what a control affects rather than by
 what it looks like puts the send-time controls with the box you type in, and
 leaves the topbar holding chat-level state.

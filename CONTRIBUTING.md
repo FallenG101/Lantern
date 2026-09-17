@@ -105,7 +105,8 @@ by rephrasing, because the number itself is what is banned.
   every theme label must appear in the README, so a rename is caught.
 
 `tools/lint.py` also verifies quoted defaults equal the real ones, that doc links
-resolve, and that no source file is missing from the Layout block.
+resolve, that no source file is missing from the Layout block, and that first-run
+detection happens before seed backfill can create `settings.json`.
 
 Then the click-through list in `docs/shipping.md` → **Before you ship**. It is two
 minutes and it catches the class of bug that reading code does not.

@@ -18,7 +18,7 @@ manual and is kept accurate against the code.
 
 ## Where things stand
 
-**Shipped: `v1.2.7`, and the repo is public.**
+**Release candidate: `v1.2.8`. Latest public release: `v1.2.7`.**
 <https://github.com/FallenFight/Lantern>
 
 Everything below works and is documented. Tool calling, model comparison with the
@@ -49,6 +49,7 @@ has held through every release since.
 | `1.2.5` | Option chips, `roll_dice`, `{{placeholders}}`, and Continue |
 | `1.2.6` | Seeded personas and prompts reach existing installs, not just new ones |
 | `1.2.7` | Game Master seed withdrawn — it needed behaviour small models lack |
+| `1.2.8` | Restore first-run setup after seed backfill made fresh installs look used |
 
 Everything remaining is optional — see *Still open* below, ranked.
 
