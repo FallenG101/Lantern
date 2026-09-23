@@ -319,10 +319,14 @@ round-trips the whole chat dict. Degraded, not broken, exactly as promised.
 
 ## The first-run flow
 
-Three steps, because a new user has exactly three questions: is Ollama working,
-which model, and what is this allowed to do. Skippable at every point — an
-onboarding flow you cannot escape is worse than none, and skipping leaves every
-default exactly as it ships.
+The welcome step now selects a local backend as well as checking its connection.
+The rest of the flow asks which model to use, how Lantern should look, and what
+it is allowed to do.
+The backend is saved before refreshing models; the blank chat created at boot is
+retargeted to the model picked during setup.
+
+It remains skippable at every point — an onboarding flow you cannot escape is
+worse than none, and skipping leaves every default exactly as it ships.
 
 **Detecting "first run" is the part that can go wrong.** The obvious signal is
 `settings.onboarded`, and it is the wrong one: an existing install that has never

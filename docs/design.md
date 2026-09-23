@@ -149,14 +149,16 @@ and may change freely.
 **The app was already portable and nobody had noticed.** `server.py` is 2,200
 lines with no macOS in it at all: no POSIX-only imports, no POSIX-only `os`
 calls, no hardcoded Unix paths, every filesystem path through `pathlib`, and it
-does not even start Ollama — it only reports whether it is reachable. The front
+does not start either model server — it only reports whether the selected one is
+reachable. The front
 end has had `MOD = isMac ? '⌘' : 'Ctrl+'` since the beginning.
 
 Everything macOS-only is **packaging**, about 785 lines of it: `main.swift`,
 `build-app.sh` and the `lantern` bash launcher. None of it is the app.
 
 So the browser path costs almost nothing, and `lantern.cmd` mirrors the bash
-launcher — `%APPDATA%\Lantern` for history, start Ollama if nothing answers.
+launcher — `%APPDATA%\Lantern` for history, start Ollama if it is selected and
+nothing answers. OpenAI-compatible local servers are started in their own runner.
 
 Two things the audit turned up:
 

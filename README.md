@@ -1,6 +1,6 @@
 # Lantern
 
-A local chat interface for [Ollama](https://ollama.com). Inference runs on your
+A local chat interface for Ollama or an OpenAI-compatible local server. Inference runs on your
 machine, chats are plain JSON files on your disk, and there are no accounts or
 telemetry.
 
@@ -10,14 +10,35 @@ is a couple of megabytes.
 
 ## Requirements
 
-- [Ollama](https://ollama.com) with at least one model pulled
+- A local model server: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai),
+  [llama.cpp](https://github.com/ggml-org/llama.cpp), or [Jan](https://jan.ai), with a model ready
 - Python 3.9 or later
 - macOS 11 or later for the Mac app; Xcode command line tools
   (`xcode-select --install`) to build it
 
 Models that support tool calling and extended thinking get the most out of
-Lantern. Don't trust `ollama list` for capabilities, it under-reports them. The
-Models panel shows what Lantern detects.
+Lantern. For Ollama, Lantern checks `/api/show` because `ollama list`
+under-reports capabilities. OpenAI-compatible servers do not expose a uniform
+capability list; Lantern offers tools initially and remembers if a model rejects
+them, then continues the reply without tools. Refresh Models to try again.
+
+### Use a local server other than Ollama
+
+Start your runner's OpenAI-compatible API server, then in Lantern open
+Settings → Local model server, choose **OpenAI-compatible**, enter its local
+`/v1` URL, and Apply connection. Common addresses are
+`http://127.0.0.1:1234/v1` for LM Studio and `http://127.0.0.1:8080/v1` for
+llama.cpp; Jan uses the port configured in Jan. A server that requires a key can
+be given one in the same panel. It is saved in Lantern's local settings file.
+
+Lantern only accepts loopback HTTP endpoints for this connection. It will not
+send chats to a hosted API or follow redirects to one. Ollama remains the
+default for existing installs. Manage/download models in your chosen runner;
+Lantern's Models panel lists them and lets you choose one. After switching,
+older chats remain on disk, but select a model available on the new server
+before continuing them. OpenAI-compatible runners vary in tool and vision
+support, so these features depend on the model and runner. Lantern currently
+does not auto-detect vision for this backend.
 
 ## Install
 
@@ -28,7 +49,7 @@ and reported as damaged.
 ### Mac app
 
 ```bash
-git clone https://github.com/FallenFight/Lantern.git
+git clone https://github.com/FallenG101/Lantern.git
 cd Lantern
 ./build-app.sh
 cp -R dist/Lantern.app /Applications/
@@ -48,7 +69,7 @@ touches them.
 ./lantern
 ```
 
-Starts Ollama if it isn't running, then opens <http://127.0.0.1:8777>. It shares
+Starts Ollama if it is selected and isn't running, then opens <http://127.0.0.1:8777>. It shares
 history with the Mac app. To run the server directly:
 
 ```bash
@@ -64,7 +85,7 @@ should run anywhere Python does, in a browser:
 python3 server.py --open
 ```
 
-Windows has a `lantern.cmd` that starts Ollama and stores history in
+Windows has a `lantern.cmd` that starts Ollama when selected and stores history in
 `%APPDATA%\Lantern`. Linux uses `./lantern` and `~/.local/share/lantern`.
 
 Nobody has run either platform. The code has been audited for portability, but an
@@ -88,8 +109,8 @@ GitHub for newer releases if you turn that on in Settings; it is off by default.
 
 ## Features
 
-**First run.** A brand-new install opens a short setup flow: it checks Ollama is
-reachable, lets you pick a default model, and shows what Lantern may do — tools,
+**First run.** A brand-new install opens a short setup flow: choose a local model
+server, check that it is reachable, pick a default model, and see what Lantern may do — tools,
 reading web pages, checking for updates — each with a switch. Skippable, and it
 only appears on a data folder with no history, so upgrading never triggers it.
 
@@ -139,7 +160,9 @@ inserted from the command palette. A saved prompt can hold `{{placeholders}}`:
 inserting it asks you to fill the blanks first, and anything left empty stays
 visible so you can finish it in the composer.
 
-**Models and parameters.** Pull with a progress bar, delete, unload, preload.
+**Models and parameters.** On Ollama, pull with a progress bar, delete, unload,
+and preload. On other local servers, manage models in the runner and choose them
+in Lantern.
 Temperature, top-p, top-k, min-p, repeat penalty, context window, prediction
 limit, seed, and stop sequences, set globally, per persona, or per chat. A
 built-in guide explains what each value does.
@@ -161,7 +184,9 @@ offers the backup first and asks you to type the word before it will run.
 The Tools pill, under the message box, lets a model call into Lantern for things
 it cannot know. It has two settings: **off**, and **auto**, where the tools are
 offered and the model decides whether to use any. Auto is the default for new
-chats, and only applies to models that advertise tool support. Turn it off in
+chats. With Ollama, this applies to models that advertise tool support. With an
+OpenAI-compatible server, Lantern tries tools and falls back to plain chat if
+the model or runner rejects them. Turn it off in
 Settings if you would rather not pay the schema tokens until you ask.
 
 | Tool | What it does |
@@ -210,17 +235,21 @@ platforms.
 
 ## Troubleshooting
 
-**Can't reach Ollama.** Start it with `ollama serve`, then press Retry in the
-banner.
+**Can't reach the model server.** Start Ollama with `ollama serve`, or start the
+API server in LM Studio, llama.cpp, or Jan. Check the local `/v1` URL in Settings,
+then press Retry in the banner.
 
-**No models listed.** Run `ollama pull <name>`, or pull one from the Models
-panel.
+**No models listed.** With Ollama, run `ollama pull <name>` or use the Models
+panel. With another runner, download and load the model there, then refresh
+Lantern's Models panel.
 
-**No Tools pill.** The model doesn't advertise tool calling. Check the Models
-panel for a tools chip. The pill sits under the message box, beside Think.
+**No Tools pill.** On Ollama, check whether the model advertises tool calling.
+On another runner, Lantern may have learned that this model rejects tools;
+Refresh Models to retry. The pill sits under the message box, beside Think.
 
 **Replies slow to start.** The model is loading. Turn on *Keep models loaded* in
-Settings to stop Ollama evicting it after a few idle minutes.
+Settings to stop Ollama evicting it after a few idle minutes. Other runners
+control loading themselves.
 
 ## Security and privacy
 
@@ -230,7 +259,8 @@ and plain files are what makes the data recoverable by hand.
 The server rejects anything another site could forge: non-loopback `Host` headers
 (DNS rebinding), cross-site `Sec-Fetch-Site`, and non-loopback `Origin`. Requests
 with no `Origin` still pass, so `curl` and scripts work. There is a request body
-cap, an allow-list on the options forwarded to Ollama, type-checked settings
+cap, an allow-list on the options forwarded to Ollama, a local-only URL and
+no-redirect rule for the OpenAI-compatible backend, type-checked settings
 writes, and regex-validated chat IDs on every write path.
 
 Tools run in the server process, read-only. No shell, no file writes, and no
@@ -258,7 +288,7 @@ release exists: an anonymous read of the public releases list, with no account,
 token, or identifier beyond a version string in the user agent.
 
 Both switches are enforced on the server, not just in the interface. Turn both
-off and Lantern contacts nothing but your local Ollama.
+off and Lantern contacts nothing but your selected local model server.
 
 ## Layout
 
@@ -266,7 +296,7 @@ The app is one codebase and runs anywhere. Only packaging is platform-specific,
 and nothing is built at all outside macOS.
 
 ```
-server.py            HTTP server: Ollama proxy, JSON storage, same-origin
+server.py            HTTP server: local backend adapters, JSON storage, same-origin
                      guard, tool registry (a tool is one entry in TOOLS)
 static/
   index.html
@@ -278,7 +308,7 @@ static/
     markdown.js      markdown, syntax highlighting, LaTeX subset
     modals.js        settings, personas, models, parameters, guide
     palette.js       command palette
-    onboard.js       first-run flow: Ollama check, model, permissions
+    onboard.js       first-run flow: server check, model, permissions
     theme.js         theme variables
     api.js           fetch and NDJSON streaming
     util.js          helpers
@@ -290,9 +320,11 @@ native/main.swift    macOS: NSWindow and WKWebView host
 tools/make_icon.py   macOS: renders the icon procedurally
 
 tools/lint.py        checks the code and docs against past mistakes
+tools/test_openai_backend.py  local mock-server integration test
 tools/hooks/         git hooks: git config core.hooksPath tools/hooks
 NOTES.md             where things stand, and what is still open
 docs/design.md       how it is built and why
+docs/backends.md     local backend adapter and compatibility edges
 docs/tools.md        tool calling and the two network paths
 docs/features.md     comparison, folders, first run, reset
 docs/shipping.md     security model, data safety, pre-release checklist
@@ -304,15 +336,16 @@ Chat writes are atomic, using a temporary file and a rename.
 
 ## Notes
 
-- Streaming is NDJSON over chunked transfer, relayed from Ollama. Stopping aborts
-  the request, and the closed socket is what tells Ollama to stop working.
+- Lantern streams NDJSON to the interface. Ollama's NDJSON is relayed; an
+  OpenAI-compatible server's SSE stream is translated. Stopping closes the
+  upstream request.
 - Thinking is not replayed to the model on later turns, matching how Ollama's
   chat templates expect history. Tool calls and their results are.
 - Titles are generated by the chat's own model, falling back to the first line of
   your message.
 - The context gauge under the composer is an approximation, not a real tokenizer.
-- Context window: default 32768 tokens. Parameters has a button that reads the
-  model's real limit.
+- Context window: default 32768 tokens. With Ollama, Parameters can read the
+  model's reported limit; other runners may not report one.
 
 [`NOTES.md`](NOTES.md) has the current state and the open list, and links to
 `docs/` for the design decisions, the approaches that were rejected, and the bugs

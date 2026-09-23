@@ -248,7 +248,7 @@ function renderTopbar() {
 
   const dot = $('#status-dot');
   dot.className = `status-dot ${anyStreaming() ? 'busy' : (S.ollamaOk ? 'ok' : 'bad')}`;
-  dot.title = S.ollamaOk ? `Ollama connected · ${S.host}` : `Cannot reach ${S.host}`;
+  dot.title = S.ollamaOk ? `Model server connected · ${S.host}` : `Cannot reach ${S.host}`;
 
   const banner = $('#banner');
   if (!S.ollamaOk) {
@@ -256,8 +256,9 @@ function renderTopbar() {
     banner.textContent = '';
     banner.append(
       el('span', {},
-        "Can't reach Ollama at ", el('code', { text: S.host }),
-        '. Start it with ', el('code', { text: 'ollama serve' }), '.'),
+        "Can't reach model server at ", el('code', { text: S.host }),
+        S.settings?.backend === 'openai' ? '. Start it in your local runner, or change the connection in Settings.'
+          : '. Start it with ollama serve.'),
       el('span', { class: 'grow' }),
       el('button', {
         class: 'btn btn-ghost', text: 'Retry',
@@ -402,7 +403,7 @@ function openModelMenu() {
     }
     if (S.models.some((m) => !thinkingAdvertised(m.name) && thinkingSupported(m.name))) {
       menu.append(el('div', { class: 'menu-label',
-        text: 'THINK* = reasoning confirmed by use, not declared by Ollama' }));
+        text: 'THINK* = reasoning confirmed by use, not declared by the model server' }));
     }
     menu.append(el('div', { class: 'menu-sep' }));
     menu.append(menuItem({ title: 'Manage models…', keys: `${MOD}M`, run: openModels }));
@@ -839,6 +840,10 @@ function wireComposer() {
   async function submit() {
     const text = input.value;
     if (!text.trim() && !S.attachments.length) return;
+    if (!S.models.some((model) => model.name === currentModel())) {
+      toast('Choose a model available on this server before sending', 'bad');
+      return;
+    }
     input.value = '';
     localStorage.removeItem(`lantern.draft.${S.chat?.id || 'none'}`);
     sync();
@@ -1181,7 +1186,7 @@ function setupCommands() {
       await removeChat(S.chat.id);
       toast('Chat deleted');
     } },
-    { title: 'Refresh models from Ollama', keywords: 'reload sync', run: async () => {
+    { title: 'Refresh models from local server', keywords: 'reload sync', run: async () => {
       await refreshModels();
       toast('Models refreshed');
     } },
@@ -1372,19 +1377,24 @@ async function init() {
   refreshUpdate();
 
   // Preload so the first message does not pay a cold model load.
-  if (S.settings.preload_default && S.settings.default_model && S.ollamaOk) {
+  if (S.settings.backend !== 'openai' && S.settings.preload_default && S.settings.default_model && S.ollamaOk) {
     api.loadModel(S.settings.default_model, S.settings.keep_alive || undefined)
       .then(() => refreshModels())
       .catch(() => { /* not fatal — the first message just loads it instead */ });
   }
 
-  // Keep the loaded-model indicator honest without hammering Ollama.
+  // Keep the model list and loaded-model indicator current without polling hard.
   setInterval(async () => {
     if (anyStreaming() || !document.hasFocus()) return;
+    const source = `${S.settings.backend}|${S.host}`;
     try {
       const data = await api.models();
+      if (source !== `${S.settings.backend}|${S.host}`) return;
       S.running = data.running || [];
-      const changed = data.models.length !== S.models.length;
+      S.host = data.host || S.host;
+      const changed = data.models.length !== S.models.length
+        || data.models.some((model, index) => model.name !== S.models[index]?.name
+          || model.supports_tools !== S.models[index]?.supports_tools);
       S.models = data.models;
       if (!S.ollamaOk) { S.ollamaOk = true; renderTopbar(); }
       if (changed) emit('models');

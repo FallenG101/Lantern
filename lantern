@@ -14,6 +14,11 @@ if [ -z "${LANTERN_DATA:-}" ]; then
 fi
 export LANTERN_DATA
 
+BACKEND="$(python3 -c 'import json,os; p=os.path.join(os.environ["LANTERN_DATA"],"settings.json"); print(json.load(open(p)).get("backend","ollama") if os.path.isfile(p) else "ollama")' 2>/dev/null || echo ollama)"
+if [ "$BACKEND" = "openai" ]; then
+  exec python3 server.py --open "$@"
+fi
+
 if ! command -v ollama >/dev/null 2>&1; then
   echo "Ollama isn't installed. Get it from https://ollama.com/download" >&2
   exit 1

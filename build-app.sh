@@ -133,8 +133,9 @@ if [ -f "$DATA/.port" ] && lantern_on "$(cat "$DATA/.port")"; then
   PORT="$(cat "$DATA/.port")"
   echo "reusing running instance on $PORT"
 else
-  # 3. make sure Ollama is listening
-  if ! alive; then
+  # 3. make sure Ollama is listening when it is the selected backend
+  BACKEND="$("$PY" -c 'import json,sys; p=sys.argv[1]; print(json.load(open(p)).get("backend","ollama"))' "$DATA/settings.json" 2>/dev/null || echo ollama)"
+  if [ "$BACKEND" != "openai" ] && ! alive; then
     echo "starting Ollama"
     if [ -d /Applications/Ollama.app ]; then
       open -g -a Ollama || true
@@ -143,7 +144,9 @@ else
     fi
     for _ in $(seq 1 30); do alive && break; sleep 0.4; done
   fi
-  alive || echo "warning: Ollama still unreachable; Lantern will show a banner"
+  if [ "$BACKEND" != "openai" ]; then
+    alive || echo "warning: Ollama still unreachable; Lantern will show a banner"
+  fi
 
   # 4. first free port from 8777
   for p in $(seq 8777 8797); do

@@ -106,7 +106,7 @@ function updateEmptyState() {
   if (info?.supports_tools) bits.push('tools');
   $('#empty-sub').textContent = bits.length
     ? bits.join('  ·  ')
-    : 'Local chat over Ollama.';
+    : 'Local chat with your selected model server.';
 
   const starters = $('#starters');
   starters.textContent = '';
@@ -619,6 +619,10 @@ export async function sendMessage(text) {
 
   if (!S.chat) await newChat({ focus: false });
   const chat = S.chat;
+  if (!S.models.some((model) => model.name === currentModel(chat))) {
+    toast('Choose a model available on this server before sending', 'bad');
+    return;
+  }
   // Only this conversation being busy blocks a send; other chats may stream.
   if (isStreaming(chat.id)) {
     toast('This chat is still replying', 'bad');
@@ -843,7 +847,11 @@ export async function runAssistant(chat = S.chat, opts = {}) {
 
   const model = opts.model || currentModel(chat);
   if (!model) {
-    toast('No model selected — pull one from the Models panel', 'bad');
+    toast('No model selected — choose one from the Models panel', 'bad');
+    return;
+  }
+  if (!S.models.some((item) => item.name === model)) {
+    toast('This model is not available on the selected server. Choose one from Models.', 'bad');
     return;
   }
   const visible = () => S.chat?.id === chat.id;
@@ -960,6 +968,12 @@ export async function runAssistant(chat = S.chat, opts = {}) {
 
     for await (const chunk of chatStream(body, abort.signal)) {
       if (chunk.error) throw new Error(chunk.error);
+      if (chunk.warning) toast(chunk.warning, 'bad');
+      if (chunk.tools_unavailable) {
+        const info = modelInfo(model);
+        if (info) info.supports_tools = false;
+        emit('models');
+      }
       const part = chunk.message || {};
 
       if ((part.thinking || part.content) && firstTokenAt === null) {

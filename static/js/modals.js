@@ -107,7 +107,7 @@ function updateRow() {
 
   const row = srow('Check for updates',
     'Asks GitHub once per launch whether a newer release exists. This is the only '
-    + 'request Lantern makes that is not to your local Ollama.',
+    + 'request Lantern makes that is not to your selected local model server.',
     el('div', { style: 'display:flex;align-items:center;gap:8px' },
       recheck,
       toggle(S.settings?.update_check, async (on) => {
@@ -346,6 +346,46 @@ export function openSettings() {
   const st = S.settings;
   const body = el('div');
 
+  body.append(sectionTitle('Local model server'));
+  const backend = el('select', { class: 'inp' },
+    el('option', { value: 'ollama', text: 'Ollama' }),
+    el('option', { value: 'openai', text: 'OpenAI-compatible (LM Studio, llama.cpp, Jan)' }));
+  backend.value = st.backend || 'ollama';
+  const endpoint = el('input', { class: 'inp', value: st.openai_base_url || 'http://127.0.0.1:1234/v1',
+    placeholder: 'http://127.0.0.1:1234/v1' });
+  const key = el('input', { class: 'inp', type: 'password', value: st.openai_api_key || '',
+    placeholder: 'Optional local server key' });
+  const connection = el('div', { class: 'field' }, endpoint, key);
+  const syncConnection = () => { connection.hidden = backend.value !== 'openai'; };
+  backend.addEventListener('change', syncConnection);
+  syncConnection();
+  body.append(srow('Backend', 'Choose where Lantern runs your chats. Ollama stays available.', backend));
+  body.append(srow('Connection', 'Local HTTP only. LM Studio usually uses port 1234; llama.cpp uses 8080; Jan uses its configured port. The optional key is saved in your local settings file.', connection));
+  body.append(el('button', { class: 'btn btn-primary', text: 'Apply connection', onclick: async () => {
+    const url = endpoint.value.trim().replace(/\/+$/, '');
+    if (backend.value === 'openai' && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+(?:\/[^/?#]+)*\/v1$/.test(url)) {
+      toast('Use a local URL ending in /v1, including its port', 'bad'); return;
+    }
+    try {
+      const switching = backend.value !== st.backend
+        || (backend.value === 'openai' && url !== st.openai_base_url);
+      await patchSettings({ backend: backend.value, openai_base_url: url,
+        openai_api_key: key.value, default_model: switching ? null : st.default_model });
+      await refreshModels();
+      if (S.models.length && !S.models.some((model) => model.name === S.settings.default_model)) {
+        await patchSettings({ default_model: S.models[0].name });
+      }
+      if (S.chat && !S.chat.messages?.length && S.models.length
+          && !S.models.some((model) => model.name === S.chat.model)) {
+        S.chat.model = S.settings.default_model;
+        queueSaveChat();
+        emit('model-changed');
+      }
+      openSettings();
+      toast(S.ollamaOk ? 'Connected' : 'Saved. Start the local server and refresh models', S.ollamaOk ? '' : 'bad');
+    } catch (err) { toast(err.message, 'bad'); }
+  } }));
+
   body.append(sectionTitle('Appearance'));
   const themeGrid = el('div', { class: 'theme-grid' });
   const paint = () => $$('.theme-chip', themeGrid).forEach((c) =>
@@ -410,8 +450,8 @@ export function openSettings() {
   // with the setting off the model is never told read_url exists.
   body.append(srow('Let the model read web pages',
     'Adds a read_url tool, so pasting a link and asking about it works. This is the '
-    + 'only part of Lantern that reaches the internet — turn it off and nothing but '
-    + 'your local Ollama is ever contacted. Pages on this machine or your private '
+    + 'only part of Lantern that reaches the internet — turn it off and only '
+    + 'your selected local model server is contacted. Pages on this machine or your private '
     + 'network are always refused, switched on or not.',
     toggle(st.web_reader, async (v) => {
       await patchSettings({ web_reader: v });
@@ -419,6 +459,7 @@ export function openSettings() {
       emit('models');      // the Tools pill and its caret list re-read S.tools
     })));
 
+  if (st.backend !== 'openai') {
   body.append(sectionTitle('Performance'));
   const ka = el('select', { class: 'inp', onchange: (e) => patchSettings({ keep_alive: e.target.value }) });
   for (const [value, label] of [['', "Ollama's default (5 min)"], ['30m', '30 minutes'],
@@ -433,6 +474,7 @@ export function openSettings() {
   body.append(srow('Preload on launch',
     'Load the default model at startup so the first message is instant.',
     toggle(st.preload_default, (v) => patchSettings({ preload_default: v }))));
+  }
 
   body.append(sectionTitle('Defaults'));
   const modelSel = el('select', { class: 'inp', onchange: (e) => patchSettings({ default_model: e.target.value }) });
@@ -467,10 +509,10 @@ export function openSettings() {
   body.append(paramFields(st.default_params, (patch) => patchSettings({ default_params: patch })));
 
   body.append(sectionTitle('About'));
-  body.append(srow('Version', 'A lean local chat interface for Ollama.',
+  body.append(srow('Version', 'A lean local chat interface.',
     el('span', { class: 'mono-sm', text: S.version ? `v${S.version}` : '—' })));
   body.append(updateRow());
-  body.append(srow('Ollama host', S.host, el('span', {
+  body.append(srow('Model server', S.host, el('span', {
     class: 'mono-sm', text: S.ollamaOk ? 'connected' : 'unreachable' })));
   body.append(srow('Data folder', S.dataDir,
     el('button', {
@@ -675,7 +717,11 @@ const PARAM_DEFS = [
 
 function paramFields(params, onpatch) {
   const box = el('div');
+  const compatible = S.settings?.backend === 'openai';
+  if (compatible) box.append(el('div', { class: 'hint',
+    text: 'This backend uses common sampling options only. Model memory and context are managed in your runner.' }));
   for (const [key, label, sub, min, max, step, fmt] of PARAM_DEFS) {
+    if (compatible && key !== 'temperature' && key !== 'top_p') continue;
     const value = params[key] ?? 0;
     box.append(srow(label, sub, slider(value, min, max, step, fmt, (v) => onpatch({ [key]: v }))));
   }
@@ -692,7 +738,7 @@ function paramFields(params, onpatch) {
       text: 'Max', title: `Use this model's trained context (${num(trained)})`,
       onclick: () => { ctx.value = trained; onpatch({ num_ctx: trained }); },
     }) : null);
-  box.append(srow('Context window',
+  if (!compatible) box.append(srow('Context window',
     `num_ctx — larger uses more memory.${trained ? ` This model supports ${num(trained)}.` : ''}`,
     ctxCtl));
 
@@ -701,7 +747,9 @@ function paramFields(params, onpatch) {
     value: params.num_predict ?? -1,
     onchange: (e) => onpatch({ num_predict: parseInt(e.target.value, 10) }),
   });
-  box.append(srow('Max output tokens', 'num_predict — -1 means unlimited.', predict));
+  box.append(srow('Max output tokens', compatible
+    ? 'Positive values are sent as max_tokens; -1 leaves the runner default.'
+    : 'num_predict — -1 means unlimited.', predict));
 
   const seed = el('input', {
     class: 'inp', type: 'number', placeholder: 'random',
@@ -722,13 +770,13 @@ function paramFields(params, onpatch) {
 
   // Escape hatches. Ollama picks these itself and gets it right almost always;
   // blank means "leave it alone" rather than "use zero".
-  box.append(sectionTitle('Advanced — leave blank unless you know why'));
+  if (!compatible) box.append(sectionTitle('Advanced — leave blank unless you know why'));
   const hw = [
     ['num_gpu', 'GPU layers', 'Layers offloaded to the GPU. Blank = auto-detect.'],
     ['num_thread', 'CPU threads', 'Blank = auto.'],
     ['num_batch', 'Batch size', 'Prompt tokens processed per pass. Blank = auto.'],
   ];
-  for (const [key, label, sub] of hw) {
+  for (const [key, label, sub] of compatible ? [] : hw) {
     box.append(srow(label, sub, el('input', {
       class: 'inp', type: 'number', min: 0, placeholder: 'auto',
       value: params[key] ?? '',
@@ -1031,6 +1079,24 @@ function importPersonas() {
 export function openModels() {
   const body = el('div');
 
+  if (S.settings?.backend === 'openai') {
+    body.append(el('div', { class: 'hint', text: 'Add, download, and load models in your local runner. Then refresh this list in Lantern.' }));
+    body.append(sectionTitle(`Available (${S.models.length})`));
+    const list = el('div', { class: 'cards' });
+    for (const model of S.models) {
+      list.append(el('div', { class: 'card' },
+        el('div', { class: 'card-body' }, el('div', { class: 'card-title', text: model.name })),
+        el('div', { class: 'card-acts' }, el('button', {
+          class: 'btn btn-ghost', text: 'Use', onclick: () => { pickModel(model.name); closeModal(); },
+        }))));
+    }
+    if (!S.models.length) list.append(el('div', { class: 'p-none', text: `No models reported by ${S.host}.` }));
+    body.append(list);
+    return openModal('Models', body, el('div', { class: 'row' },
+      el('button', { class: 'btn btn-ghost', text: 'Refresh', onclick: async () => { await refreshModels(); openModels(); } }),
+      el('button', { class: 'btn btn-primary', text: 'Done', onclick: closeModal })), { wide: true });
+  }
+
   const pullRow = el('div', { class: 'field' },
     el('label', { text: 'Pull a model' }),
     el('div', { class: 'row' },
@@ -1055,7 +1121,7 @@ export function openModels() {
           thinkingAdvertised(model.name)
             ? el('span', { class: 'tag think', text: 'THINK' })
             : (thinkingSupported(model.name)
-                ? el('span', { class: 'tag think', title: 'Reasoning confirmed by use; Ollama does not declare it', text: 'THINK*' })
+                ? el('span', { class: 'tag think', title: 'Reasoning confirmed by use; the model server does not declare it', text: 'THINK*' })
                 : null),
           model.supports_vision ? el('span', { class: 'tag vision', text: 'VISION' }) : null,
           model.supports_tools ? el('span', {

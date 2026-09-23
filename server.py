@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Lantern - a lean local LLM interface backed by Ollama.
+Lantern - a lean local LLM interface.
 
-Stdlib only. No dependencies, no build step, no telemetry, no network access
-beyond your local Ollama instance.
+Stdlib only. No dependencies, no build step, no telemetry. Inference stays on
+your selected local server; the web reader and update check are separate,
+user-controlled outbound paths.
 
     python3 server.py            # http://127.0.0.1:8777
     python3 server.py --port 9000 --open
@@ -48,11 +49,11 @@ except ImportError:      # exotic build with no zoneinfo — local time still wo
 
 # The single source of truth for the version. build-app.sh reads this line to
 # stamp Info.plist, so the app bundle and the About panel cannot disagree.
-VERSION = "1.2.8"
+VERSION = "1.3.0"
 
 # The update check. Unauthenticated and read-only; GitHub allows 60 requests an
 # hour per IP, which one check per launch cannot come near.
-UPDATE_REPO = "FallenFight/Lantern"
+UPDATE_REPO = "FallenG101/Lantern"
 UPDATE_API = "https://api.github.com/repos/%s/releases/latest" % UPDATE_REPO
 UPDATE_PAGE = "https://github.com/%s/releases/latest" % UPDATE_REPO
 _UPDATE_CACHE = {"at": 0.0, "data": None}
@@ -76,6 +77,9 @@ LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
 ALLOWED_HOSTS = set(LOOPBACK)
 
 DEFAULT_SETTINGS = {
+    "backend": "ollama",          # ollama | openai
+    "openai_base_url": "http://127.0.0.1:1234/v1",
+    "openai_api_key": "",           # optional, for local servers that require one
     "theme": "dark",              # dark | light | system
     "accent": "indigo",
     "font_size": 15,
@@ -342,6 +346,18 @@ def save_settings(patch: dict) -> dict:
     with _LOCK:
         current = get_settings()
         for key, value in patch.items():
+            if key == "backend":
+                if value in ("ollama", "openai"):
+                    current[key] = value
+                continue
+            if key == "openai_base_url":
+                if isinstance(value, str) and valid_local_base_url(value):
+                    current[key] = value.rstrip("/")
+                continue
+            if key == "openai_api_key":
+                if isinstance(value, str) and len(value) <= 512:
+                    current[key] = value
+                continue
             if key == "default_params":
                 if isinstance(value, dict):
                     for pk, pv in value.items():
@@ -651,6 +667,50 @@ def check_update(force: bool = False) -> dict:
 
 _caps_cache: dict[str, dict] = {}
 _caps_lock = threading.Lock()
+_openai_no_tools: set[tuple[str, str]] = set()
+
+
+def valid_local_base_url(value: str) -> bool:
+    """Never let a settings patch turn local prompts/API keys into remote traffic."""
+    try:
+        url = urllib.parse.urlsplit(value)
+        return (url.scheme == "http" and url.hostname in LOOPBACK
+                and url.port is not None and not url.username and not url.password
+                and not url.query and not url.fragment and url.path.rstrip("/").endswith("/v1"))
+    except ValueError:
+        return False
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
+
+def backend_config() -> tuple[str, str, str]:
+    settings = get_settings()
+    if settings.get("backend") == "openai":
+        base = settings.get("openai_base_url") or ""
+        if not valid_local_base_url(base):
+            raise ValueError("Local endpoint must be an http://localhost:<port>/v1 URL")
+        return "openai", base.rstrip("/"), settings.get("openai_api_key") or ""
+    return "ollama", OLLAMA, ""
+
+
+def openai_request(path: str, payload=None, timeout: int = 30):
+    _, base, key = backend_config()
+    headers = {"Accept": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(base + path, data=body, headers=headers)
+    with _LOCAL_OPENER.open(request, timeout=timeout) as response:
+        raw = response.read()
+    return json.loads(raw) if raw else {}
 
 
 def ollama_request(path: str, payload=None, method: str | None = None, timeout: int = 30):
@@ -697,6 +757,22 @@ def model_details(name: str) -> dict:
 
 
 def list_models() -> dict:
+    backend, base, _ = backend_config()
+    if backend == "openai":
+        result = openai_request("/models", timeout=15)
+        models = []
+        for entry in result.get("data") or []:
+            name = entry.get("id") if isinstance(entry, dict) else None
+            if name:
+                models.append({"name": name, "size": None, "modified_at": None,
+                               "family": None, "parameter_size": None,
+                               "quantization": None, "context_length": None,
+                               "capabilities": [], "supports_thinking": False,
+                               "supports_vision": False,
+                               "supports_tools": (base, name) not in _openai_no_tools,
+                               "default_system": ""})
+        models.sort(key=lambda m: m["name"].lower())
+        return {"models": models, "running": [], "host": base}
     tags = ollama_request("/api/tags", timeout=15)
     models = []
     for entry in tags.get("models") or []:
@@ -740,18 +816,26 @@ def generate_title(model: str, transcript: str) -> str:
         "no trailing punctuation, no the word 'chat'. Reply with the title only.\n\n"
         + transcript[:2000]
     )
-    result = ollama_request(
-        "/api/chat",
-        {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0.2, "num_predict": 24},
-        },
-        timeout=120,
-    )
-    title = ((result.get("message") or {}).get("content") or "").strip()
+    if backend_config()[0] == "openai":
+        result = openai_request("/chat/completions", {
+            "model": model, "messages": [{"role": "user", "content": prompt}],
+            "stream": False, "temperature": 0.2, "max_tokens": 24,
+        }, timeout=120)
+        title = ((((result.get("choices") or [{}])[0].get("message") or {})
+                  .get("content")) or "").strip()
+    else:
+        result = ollama_request(
+            "/api/chat",
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "think": False,
+                "options": {"temperature": 0.2, "num_predict": 24},
+            },
+            timeout=120,
+        )
+        title = ((result.get("message") or {}).get("content") or "").strip()
     title = re.sub(r"<think>.*?</think>", "", title, flags=re.S).strip()
     title = title.splitlines()[0] if title else ""
     title = title.strip().strip("\"'*#").rstrip(".!,: ").strip()
@@ -1802,7 +1886,8 @@ class Handler(BaseHTTPRequestHandler):
                 "version": VERSION,
                 "tools": tool_catalog(),
                 "tool_round_limit": TOOL_ROUND_LIMIT,
-                "host": OLLAMA,
+                "host": backend_config()[1],
+                "ollama_host": OLLAMA,
                 "data_dir": str(DATA),
             }
             try:
@@ -1820,15 +1905,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self.json_out(list_models())
             except Exception as exc:
-                return self.fail(503, f"Cannot reach Ollama at {OLLAMA}", str(exc))
+                return self.fail(503, f"Cannot reach {backend_config()[1]}", str(exc))
 
         if parts == ["models", "refresh"] and method == "POST":
             with _caps_lock:
                 _caps_cache.clear()
+            _openai_no_tools.clear()
             try:
                 return self.json_out(list_models())
             except Exception as exc:
-                return self.fail(503, f"Cannot reach Ollama at {OLLAMA}", str(exc))
+                return self.fail(503, f"Cannot reach {backend_config()[1]}", str(exc))
+
+        if len(parts) == 2 and parts[0] == "models" and parts[1] in ("pull", "delete", "unload", "load") and backend_config()[0] != "ollama":
+            return self.fail(400, "Manage models in your local runner")
 
         if parts == ["models", "pull"] and method == "POST":
             return self.pull_model(self.body_json())
@@ -2204,11 +2293,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- streaming proxies ------------------------------------------------
     def proxy_chat(self, body: dict):
-        """Forward to Ollama /api/chat and relay NDJSON straight through."""
+        """Stream from the selected backend in Lantern's NDJSON shape."""
         model = body.get("model")
         messages = body.get("messages")
         if not model or not isinstance(messages, list):
             return self.fail(400, "model and messages are required")
+        if backend_config()[0] == "openai":
+            return self.proxy_openai_chat(body)
 
         payload: dict = {"model": model, "messages": messages, "stream": True}
 
@@ -2257,6 +2348,7 @@ class Handler(BaseHTTPRequestHandler):
             upstream = urllib.request.urlopen(request, timeout=600)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:600]
+            exc.close()
             try:
                 detail = json.loads(detail).get("error", detail)
             except ValueError:
@@ -2296,6 +2388,151 @@ class Handler(BaseHTTPRequestHandler):
                 upstream.close()
             except Exception:
                 pass
+            return
+        except Exception as exc:
+            try:
+                self.stream_json({"error": str(exc), "done": True})
+            except OSError:
+                pass
+        self.end_stream()
+
+    def proxy_openai_chat(self, body: dict):
+        """Translate OpenAI-compatible SSE to Lantern's existing NDJSON shape."""
+        messages = []
+        pending_ids = []
+        for row in body["messages"]:
+            role = row.get("role")
+            if role == "tool":
+                if not pending_ids:
+                    continue
+                messages.append({"role": "tool", "tool_call_id": pending_ids.pop(0),
+                                 "content": row.get("content") or ""})
+                continue
+            if role not in ("system", "user", "assistant"):
+                continue
+            item = {"role": role, "content": row.get("content") or ""}
+            if role == "user" and row.get("images"):
+                item["content"] = [{"type": "text", "text": item["content"]}]
+                for encoded in row["images"]:
+                    if isinstance(encoded, str):
+                        item["content"].append({"type": "image_url", "image_url": {
+                            "url": "data:image/jpeg;base64," + encoded}})
+            if role == "assistant" and row.get("tool_calls"):
+                calls = []
+                for index, call in enumerate(row["tool_calls"]):
+                    function = call.get("function") or {}
+                    call_id = "lantern_%d_%d" % (len(messages), index)
+                    arguments = function.get("arguments") or {}
+                    calls.append({"id": call_id, "type": "function", "function": {
+                        "name": function.get("name") or "",
+                        "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments)}})
+                    pending_ids.append(call_id)
+                item["tool_calls"] = calls
+            messages.append(item)
+
+        payload = {"model": body["model"], "messages": messages, "stream": True}
+        params = body.get("options") or {}
+        for name in ("temperature", "top_p", "presence_penalty", "frequency_penalty", "seed", "stop"):
+            if params.get(name) not in (None, "", []):
+                payload[name] = params[name]
+        if isinstance(params.get("num_predict"), int) and params["num_predict"] > 0:
+            payload["max_tokens"] = params["num_predict"]
+        _, base, key = backend_config()
+        specs = tool_specs(body.get("tools"))
+        if (base, body["model"]) in _openai_no_tools:
+            specs = []
+        if specs:
+            payload["tools"] = specs
+        headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+        if key:
+            headers["Authorization"] = "Bearer " + key
+        request = urllib.request.Request(base + "/chat/completions",
+            data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+        warning = None
+        try:
+            upstream = _LOCAL_OPENER.open(request, timeout=600)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:600]
+            exc.close()
+            if (specs and exc.code in (400, 422)
+                    and any(word in detail.lower() for word in ("tool", "function", "schema"))):
+                # Some compatible runners/models do not implement tool calling.
+                # Keep ordinary chat working, and remember this until Refresh.
+                _openai_no_tools.add((base, body["model"]))
+                payload.pop("tools", None)
+                warning = "This model/server rejected tools; replying without them. Refresh Models to try tools again."
+                retry = urllib.request.Request(base + "/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+                try:
+                    upstream = _LOCAL_OPENER.open(retry, timeout=600)
+                except urllib.error.HTTPError as retry_exc:
+                    retry_detail = retry_exc.read().decode("utf-8", "replace")[:600]
+                    retry_exc.close()
+                    return self.fail(retry_exc.code, "Local server rejected the request",
+                                     retry_detail)
+                except urllib.error.URLError as retry_exc:
+                    return self.fail(503, "Cannot reach local server at " + base,
+                                     str(retry_exc.reason))
+            else:
+                return self.fail(exc.code, "Local server rejected the request", detail)
+        except urllib.error.URLError as exc:
+            return self.fail(503, "Cannot reach local server at " + base, str(exc.reason))
+
+        self.begin_stream()
+        if warning:
+            self.stream_json({"warning": warning, "tools_unavailable": True, "done": False})
+        calls = {}
+        usage = {}
+        finish = "stop"
+        try:
+            with upstream:
+                for raw in upstream:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except ValueError:
+                        continue
+                    if event.get("error"):
+                        self.stream_json({"error": str(event["error"]), "done": True})
+                        return self.end_stream()
+                    usage = event.get("usage") or usage
+                    for choice in event.get("choices") or []:
+                        finish = choice.get("finish_reason") or finish
+                        delta = choice.get("delta") or {}
+                        message = {}
+                        if delta.get("content"):
+                            message["content"] = delta["content"]
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                        if reasoning:
+                            message["thinking"] = reasoning
+                        if message:
+                            self.stream_json({"message": message, "done": False})
+                        for part in delta.get("tool_calls") or []:
+                            index = part.get("index", 0)
+                            call = calls.setdefault(index, {"name": "", "arguments": ""})
+                            function = part.get("function") or {}
+                            call["name"] += function.get("name") or ""
+                            call["arguments"] += function.get("arguments") or ""
+            tool_calls = []
+            for index, call in sorted(calls.items()):
+                try:
+                    arguments = json.loads(call["arguments"] or "{}")
+                except ValueError:
+                    arguments = {}
+                tool_calls.append({"function": {"index": index, "name": call["name"],
+                                                "arguments": arguments}})
+            final = {"message": {"tool_calls": tool_calls} if tool_calls else {},
+                     "done": True, "done_reason": finish,
+                     "prompt_eval_count": usage.get("prompt_tokens", 0),
+                     "eval_count": usage.get("completion_tokens", 0)}
+            self.stream_json(final)
+        except (BrokenPipeError, ConnectionResetError):
+            upstream.close()
             return
         except Exception as exc:
             try:
@@ -2412,14 +2649,18 @@ def main() -> int:
     print(f"LANTERN_PORT={port}", flush=True)
 
     url = f"http://{args.host}:{port}"
+    backend, endpoint, _ = backend_config()
     reachable = True
     try:
-        ollama_request("/api/tags", timeout=4)
+        if backend == "openai":
+            openai_request("/models", timeout=4)
+        else:
+            ollama_request("/api/tags", timeout=4)
     except Exception:
         reachable = False
 
     print(f"  Lantern    {url}")
-    print(f"  Ollama     {OLLAMA}  {'ok' if reachable else 'UNREACHABLE - run `ollama serve`'}")
+    print(f"  {backend:<10} {endpoint}  {'ok' if reachable else 'UNREACHABLE'}")
     print(f"  Data       {DATA}")
     print("  Ctrl+C to stop\n")
 

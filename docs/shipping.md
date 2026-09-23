@@ -22,6 +22,12 @@ Also in place: a 64 MB request-body cap, an allow-list on the options forwarded
 to Ollama (it used to pass anything through to the runner), `observed_thinking`
 bounded to 64 entries, and type-checked settings writes.
 
+The optional OpenAI-compatible backend has a different fence: its URL must be
+loopback HTTP with an explicit port and `/v1` suffix. The opener ignores proxy
+environment variables and refuses redirects, so a local server cannot forward
+Lantern's prompts or optional local API key to a remote endpoint by redirecting.
+See [`backends.md`](backends.md) for the protocol adapter and limitations.
+
 **That last one was a real outage.** `PUT /api/settings` accepted any type;
 writing `default_params: "nope"` made the *next read* throw, so `/api/bootstrap`
 500'd and the app would not start until the file was repaired by hand. Writes
@@ -152,6 +158,13 @@ So: before a build or a release, actually click these. Two minutes.
 - [ ] Model and persona pickers in the topbar; Think and Tools **under the
       composer** — each opens, and both caret menus open *upward* and stay on
       screen. A bottom-anchored menu that opens downward is invisible
+- [ ] On a scratch data folder, select an OpenAI-compatible local runner in
+      first run and in Settings; verify model refresh, a streamed reply, a tool
+      round, title generation, and switching back to Ollama. A runner that
+      rejects tools must still answer without them and show a warning
+- [ ] A chat whose model exists only on the previous backend is retained but
+      clearly asks for a new model before sending; a new/empty chat picks an
+      available model. Reject non-loopback endpoints and remote redirects
 - [ ] Tools on: ask the time in another timezone; expand the tool row
 - [ ] **URL reader** (Settings → Behaviour → *Let the model read web pages*):
       paste a real link and ask about it, then ask it to read a URL that does
@@ -170,6 +183,7 @@ So: before a build or a release, actually click these. Two minutes.
       the counts are right, the button stays dead until the word is typed,
       and the reload lands on the first-run flow
 - [ ] `/usr/bin/python3 -m py_compile server.py`
+- [ ] `python3 -m unittest tools.test_openai_backend -v`
 - [ ] **Check `lantern.log` is empty.** A shipped app writing tracebacks looks
       broken even when it is fine — that is how the disconnect noise was found
 - [ ] **Docs pass.** Does `README.md` still describe what the app does? Does this

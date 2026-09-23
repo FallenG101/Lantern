@@ -317,11 +317,12 @@ sharper, that is the gap to close first.
 following links found on the page. Search is a later conversation, and SearXNG on
 localhost fits this project better than an API key.
 
-## The update check — the one call that leaves the machine
+## The update check — an opt-in call that leaves the machine
 
 Added in 1.0.3. **Off by default**, because "offline unless you say otherwise" is
-a promise in `CONTRIBUTING.md` and in the README, and this is the only thing in the app
-that can break it. It was raised before it was built rather than after.
+a promise in `CONTRIBUTING.md` and in the README. The URL reader is the other
+off-machine path; unlike the update check, it ships enabled. The check was
+raised before it was built rather than after.
 
 Why it exists at all: distribution is source-only, so there is no Sparkle-style
 updater and no `.app` that refreshes itself. Nothing told you a release had

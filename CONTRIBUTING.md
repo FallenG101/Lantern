@@ -3,7 +3,7 @@
 Standing constraints and working notes for anyone changing this project,
 including future-you.
 
-A local chat interface for Ollama: Python 3 stdlib server, vanilla ES modules, no
+A local chat interface for Ollama or an OpenAI-compatible local server: Python 3 stdlib server, vanilla ES modules, no
 build step. **`NOTES.md` has where things stand and what is still open; `docs/` holds the
 reasoning and the traps — read those before changing anything structural.**
 `README.md` is the user-facing manual and is kept accurate against the code.
@@ -18,7 +18,7 @@ reasoning and the traps — read those before changing anything structural.**
   socket.** Conversations, models and files stay on the machine. That is the
   promise; "makes no network call" is not, and stopped being true in 1.2.2.
 
-  Two outbound paths exist, both gated **on the server** so the switch is the
+  Two off-machine outbound paths exist, both gated **on the server** so the switch is the
   only thing that can produce a request:
 
   - `read_url` — **ships enabled.** Pasting a link and asking about it is an
@@ -32,8 +32,10 @@ reasoning and the traps — read those before changing anything structural.**
   any of that. Note the model picks the address and is only *instructed* to use
   links the user gave it.
 
-  See `docs/tools.md` → *The URL reader* and *The update check*. **A third outbound
-  path still gets raised before it is built.**
+  See `docs/tools.md` → *The URL reader* and *The update check*. The local model
+  backend is a separate loopback-only path, not an off-machine exception; its
+  URL and redirect fence is in [`docs/backends.md`](docs/backends.md). **Any new
+  off-machine path still gets raised before it is built.**
 - **The same-origin guard in `server.py` stays.** Don't loosen it.
 
 ## Data safety

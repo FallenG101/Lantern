@@ -71,6 +71,13 @@ func savedThemeIsDark() -> Bool {
     return true
 }
 
+func usesOllama() -> Bool {
+    guard let data = try? Data(contentsOf: dataDir.appendingPathComponent("settings.json")),
+          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return true }
+    return (obj["backend"] as? String) != "openai"
+}
+
 // ─────────────────────────────── app ───────────────────────────────
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
@@ -162,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
         note("python \(python)")
 
-        ensureOllama()
+        if usesOllama() { ensureOllama() }
 
         guard let resources = Bundle.main.resourceURL else {
             fail("Bundle is malformed.", "Resources folder is missing.")
@@ -511,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         let alert = NSAlert()
         alert.messageText = "Lantern"
         alert.informativeText = """
-            A lean local chat interface for Ollama.
+            A lean local chat interface.
 
             Server: 127.0.0.1:\(port)
             Data: \(dataDir.path)

@@ -1,7 +1,7 @@
 // The first-run flow.
 //
 // Shown once, on a data folder with no settings and no history. Three steps,
-// each answering a question a new user actually has: is Ollama working, which
+// each answering a question a new user actually has: is a server working, which
 // model should this use, and what is this thing allowed to do. Skippable at
 // every point, because an onboarding flow you cannot escape is worse than none.
 //
@@ -10,7 +10,7 @@
 
 import { S, emit, patchSettings, refreshModels, queueSaveChat } from './store.js';
 import { api } from './api.js';
-import { $, el, svg, ICON, shortModel } from './util.js';
+import { $, el, svg, ICON, shortModel, toast } from './util.js';
 import { applyVisual } from './modals.js';
 import { THEMES, ACCENTS } from './theme.js';
 
@@ -76,7 +76,7 @@ function go(delta) {
   render();
 }
 
-/* ── step 1: is Ollama actually working ─────────────────────────── */
+/* ── step 1: is the local server working ─────────────────────────── */
 
 function stepWelcome() {
   const wrap = el('div', { class: 'ob-step' });
@@ -87,25 +87,53 @@ function stepWelcome() {
       + 'everything it replies stays on this machine, as plain files you can read.' }),
   );
 
+  const backend = el('select', { class: 'inp' },
+    el('option', { value: 'ollama', text: 'Ollama' }),
+    el('option', { value: 'openai', text: 'Local OpenAI-compatible server' }));
+  backend.value = S.settings?.backend || 'ollama';
+  const endpoint = el('input', { class: 'inp',
+    value: S.settings?.openai_base_url || 'http://127.0.0.1:1234/v1',
+    placeholder: 'http://127.0.0.1:1234/v1' });
+  const apply = el('button', { class: 'btn btn-ghost', text: 'Connect', onclick: async () => {
+    const url = endpoint.value.trim().replace(/\/+$/, '');
+    if (backend.value === 'openai' && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+(?:\/[^/?#]+)*\/v1$/.test(url)) {
+      toast('Use a local URL ending in /v1, including its port', 'bad'); return;
+    }
+    try {
+      await patchSettings({ backend: backend.value, openai_base_url: url, default_model: null });
+      await refreshModels();
+      picked = S.models[0]?.name || null;
+      render();
+    } catch (err) { toast(err.message, 'bad'); }
+  } });
+  const connection = el('div', { class: 'row' }, endpoint, apply);
+  const sync = () => { endpoint.hidden = backend.value !== 'openai'; };
+  backend.addEventListener('change', sync);
+  sync();
+  wrap.append(el('div', { class: 'field' }, el('label', { text: 'Model server' }), backend,
+    connection, el('div', { class: 'hint', text: 'LM Studio: port 1234 · llama.cpp: port 8080 · Jan: your configured port' })));
+
   const ok = S.ollamaOk;
   const models = S.models.length;
+  const isOllama = S.settings?.backend !== 'openai';
   const status = el('div', { class: `ob-check${ok && models ? ' good' : ' warn'}` });
 
   if (!ok) {
     status.append(
-      el('div', { class: 'ob-check-title', text: 'Ollama isn\'t responding' }),
+      el('div', { class: 'ob-check-title', text: 'Model server isn\'t responding' }),
       el('div', { class: 'ob-check-sub', text:
-        `Lantern talks to Ollama at ${S.host}. Start it with "ollama serve", then check again.` }),
+        `Lantern talks to ${S.host}. Start it in your runner${isOllama ? ' with "ollama serve"' : ''}, then check again.` }),
     );
   } else if (!models) {
     status.append(
-      el('div', { class: 'ob-check-title', text: 'Ollama is running, but there are no models' }),
+      el('div', { class: 'ob-check-title', text: 'Server is running, but there are no models' }),
       el('div', { class: 'ob-check-sub', text:
-        'Pull one with "ollama pull qwen3" or from the Models panel, then check again.' }),
+        isOllama ? 'Pull one with "ollama pull qwen3" or from the Models panel, then check again.'
+          : 'Load a model in your local runner, then check again.' }),
     );
   } else {
     status.append(
-      el('div', { class: 'ob-check-title', text: 'Ollama is connected' }),
+      el('div', { class: 'ob-check-title', text: 'Model server is connected' }),
       el('div', { class: 'ob-check-sub', text:
         `Ready at ${S.host}. Pick a model on the next step.` }),
     );
@@ -141,7 +169,7 @@ function stepModel() {
     wrap.append(el('div', { class: 'ob-check warn' },
       el('div', { class: 'ob-check-title', text: 'No models installed yet' }),
       el('div', { class: 'ob-check-sub', text:
-        'Skip this for now — Lantern will work as soon as you pull one.' })));
+        'Skip this for now — Lantern will work as soon as you load one.' })));
     return wrap;
   }
 

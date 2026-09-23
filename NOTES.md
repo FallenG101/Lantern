@@ -6,6 +6,7 @@ The reasoning behind the code lives in three files beside this one:
 | | |
 |---|---|
 | [`docs/design.md`](docs/design.md) | How Lantern is built and why: the stack, architecture, platforms, UI, the markdown and LaTeX renderers |
+| [`docs/backends.md`](docs/backends.md) | The local backend adapter, security boundary, and compatibility edges |
 | [`docs/tools.md`](docs/tools.md) | Tool calling, the URL reader, the update check, and the capability traps |
 | [`docs/features.md`](docs/features.md) | Comparison, folders, first run, reset — and the traps inside each |
 | [`docs/shipping.md`](docs/shipping.md) | The security model, data safety rules, and the click-through list to run before a release |
@@ -18,8 +19,8 @@ manual and is kept accurate against the code.
 
 ## Where things stand
 
-**Release candidate: `v1.2.8`. Latest public release: `v1.2.7`.**
-<https://github.com/FallenFight/Lantern>
+**Current source version: `v1.3.0`.** See [GitHub releases](https://github.com/FallenG101/Lantern/releases) for published versions.
+<https://github.com/FallenG101/Lantern>
 
 Everything below works and is documented. Tool calling, model comparison with the
 side-by-side view, folders, a prompt library with fill-in blanks, an opt-in URL
@@ -50,13 +51,14 @@ has held through every release since.
 | `1.2.6` | Seeded personas and prompts reach existing installs, not just new ones |
 | `1.2.7` | Game Master seed withdrawn — it needed behaviour small models lack |
 | `1.2.8` | Restore first-run setup after seed backfill made fresh installs look used |
+| `1.3.0` | Local OpenAI-compatible backend, plus Ollama; model discovery, streaming, titles, tools and a local-only connection |
 
 Everything remaining is optional — see *Still open* below, ranked.
 
 ## Still open
 
-**Going public is done.** The repo is public, `v1.0.0` through `v1.0.3` are
-tagged and released, and the stranger path is verified — an anonymous clone with
+**Going public is done.** The repo is public, releases are tagged, and the
+stranger path is verified — an anonymous clone with
 credentials stripped from the environment builds and runs. The README describes
 today rather than promising a future.
 

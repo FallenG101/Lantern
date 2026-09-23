@@ -25,6 +25,7 @@ export const S = {
   ollamaError: '',
   dataDir: '',
   host: '',
+  ollamaHost: '',
 
   runs: new Map(),     // chatId -> { abort, chat, messageId }
   attachments: [],
@@ -227,6 +228,7 @@ export async function loadBootstrap() {
   S.ollamaError = data.ollama_error || '';
   S.dataDir = data.data_dir || '';
   S.host = data.host || '';
+  S.ollamaHost = data.ollama_host || S.host;
   if (!S.settings.default_model && S.models.length) {
     S.settings.default_model = S.models[0].name;
   }
@@ -263,6 +265,7 @@ export async function refreshModels() {
     const data = await api.refreshModels();
     S.models = data.models || [];
     S.running = data.running || [];
+    S.host = data.host || S.host;
     S.ollamaOk = true;
     S.ollamaError = '';
   } catch (err) {
@@ -333,7 +336,17 @@ export async function refreshPrompts() {
 }
 
 export async function patchSettings(patch) {
+  const previousBackend = S.settings?.backend;
+  const previousEndpoint = S.settings?.openai_base_url;
   S.settings = await api.saveSettings(patch);
+  S.host = S.settings.backend === 'openai'
+    ? S.settings.openai_base_url : S.ollamaHost;
+  if (previousBackend !== S.settings.backend
+      || (S.settings.backend === 'openai' && previousEndpoint !== S.settings.openai_base_url)) {
+    S.models = [];
+    S.running = [];
+    emit('models');
+  }
   emit('settings');
   return S.settings;
 }
@@ -430,7 +443,8 @@ export function flushBeacon() {
 export async function newChat({ model, personaId, focus = true } = {}) {
   await flushChat();
   const chat = await api.createChat({
-    model: model || currentModel(),
+    model: model || (S.models.some((m) => m.name === currentModel())
+      ? currentModel() : (S.settings?.default_model || S.models[0]?.name || null)),
     persona_id: personaId !== undefined ? personaId : (S.settings?.default_persona ?? null),
     think: false,
     tools: !!S.settings?.tools_default,

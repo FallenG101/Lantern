@@ -12,6 +12,11 @@ if "%LANTERN_DATA%"=="" set "LANTERN_DATA=%APPDATA%\Lantern"
 
 if "%OLLAMA_HOST%"=="" set "OLLAMA_HOST=http://127.0.0.1:11434"
 
+if exist "%LANTERN_DATA%\settings.json" (
+  findstr /c:"backend" "%LANTERN_DATA%\settings.json" | findstr /c:"openai" >nul
+  if not errorlevel 1 goto run
+)
+
 where ollama >nul 2>&1
 if errorlevel 1 (
   echo Ollama isn't installed. Get it from https://ollama.com/download 1>&2
